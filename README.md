@@ -108,5 +108,3 @@ curl -v http://localhost:<APP_PORT>
 | --------------------------------- | ---------------------------------------------- | ------- |
 | `DOTNET_USE_POLLING_FILE_WATCHER` | Fix Hot Reload by switching to polling watcher | `1`     |
 | `COMPlus_GCHeapHardLimit`         | Hard memory cap for a .NET process             | `512m`  |
-
-> Replace `<…>` with your own values. Feel free to add more shortcuts as your toolbox grows!
