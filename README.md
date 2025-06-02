@@ -108,3 +108,49 @@ curl -v http://localhost:<APP_PORT>
 | --------------------------------- | ---------------------------------------------- | ------- |
 | `DOTNET_USE_POLLING_FILE_WATCHER` | Fix Hot Reload by switching to polling watcher | `1`     |
 | `COMPlus_GCHeapHardLimit`         | Hard memory cap for a .NET process             | `512m`  |
+
+
+## Redis Commands
+
+Use these commands to connect to a Redis instance and manage keys directly from the CLI.
+
+1. **Open Redis CLI inside a Docker container**
+
+   ```bash
+   docker exec -it dapr_redis redis-cli
+   ```
+
+   * Replace `dapr_redis` with the actual container name if different.
+
+2. **List keys**
+
+   ```bash
+   KEYS *              # Show all keys
+   KEYS *pubsub*       # Search for keys containing "pubsub"
+   KEYS pubsub*        # Search for keys starting with "pubsub"
+   ```
+
+3. **Inspect a key’s type and value**
+
+   ```bash
+   TYPE {key}          # Get the data type of the key
+   GET {key}           # Retrieve string value (for String type)
+   LRANGE {key} 0 -1   # Retrieve list elements from start to end (for List type)
+   HGETALL {key}       # Retrieve all field-value pairs (for Hash type)
+   SMEMBERS {key}      # Retrieve all members of a set (for Set type)
+   ```
+
+   * Replace `{key}` with the actual key name you want to inspect.
+
+4. **Delete keys**
+
+   ```bash
+   DEL {key}           # Remove a specific key
+   ```
+
+5. **Flush entire database**
+
+   ```bash
+   FLUSHALL            # Remove all keys in the current Redis database (use with caution)
+   ```
+
