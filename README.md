@@ -154,3 +154,95 @@ Use these commands to connect to a Redis instance and manage keys directly from 
    FLUSHALL            # Remove all keys in the current Redis database (use with caution)
    ```
 
+6. **Stream Commands**
+
+   * **Add an entry to a stream**
+
+     ```bash
+     XADD {stream_key} * field1 value1 field2 value2
+       # Add a new entry to the stream; '*' lets Redis generate the ID
+       # Example: XADD mystream * sensor-id 1234 temperature 19.8
+     ```
+   * **Read entries from a stream**
+
+     ```bash
+     XRANGE {stream_key} - +            # Read all entries in ascending ID order
+     XRANGE {stream_key} {start} {end}  # Read entries between specific IDs
+       # Use '-' for minimum, '+' for maximum.
+       # Example: XRANGE mystream 1609459200000-0 1609462800000-0
+     ```
+   * **Read entries in reverse order**
+
+     ```bash
+     XREVRANGE {stream_key} + -         # Read all entries in descending ID order
+     XREVRANGE {stream_key} {end} {start}
+       # Swap start/end when using explicit IDs.
+       # Example: XREVRANGE mystream 1609462800000-0 1609459200000-0
+     ```
+   * **Trim a stream to a maximum length**
+
+     ```bash
+     XTRIM {stream_key} MAXLEN {count}  # Keep only the most recent {count} entries
+       # Example: XTRIM mystream MAXLEN 1000
+     XTRIM {stream_key} MINID {id}      # Discard entries with IDs older than {id}
+       # Example: XTRIM mystream MINID 1609459200000-0
+     ```
+   * **Read new entries (blocking or non-blocking)**
+
+     ```bash
+     XREAD STREAMS {stream_key} {last_id} [COUNT {count}] [BLOCK {milliseconds}]
+       # Read entries with ID > {last_id}; BLOCK waits up to given ms for new entries.
+       # Example (non-blocking): XREAD STREAMS mystream 0-0 COUNT 10
+       # Example (blocking):    XREAD BLOCK 5000 STREAMS mystream 0-0
+     ```
+   * **Consumer groups**
+
+     * *Create a consumer group*
+
+       ```bash
+       XGROUP CREATE {stream_key} {group_name} $ MKSTREAM
+         # Create group {group_name} starting at the latest ID ($).
+         # MKSTREAM creates {stream_key} if it does not exist.
+         # Example: XGROUP CREATE mystream mygroup $ MKSTREAM
+       ```
+     * *Read from a consumer group*
+
+       ```bash
+       XREADGROUP GROUP {group_name} {consumer_name} \
+         STREAMS {stream_key} {last_id} [COUNT {count}] [BLOCK {milliseconds}]
+         # {last_id} usually '>' to fetch new entries never delivered to this group.
+         # Example: XREADGROUP GROUP mygroup consumer1 STREAMS mystream >
+       ```
+     * *Acknowledge processed entries*
+
+       ```bash
+       XACK {stream_key} {group_name} {id1} [id2 ...]
+         # Acknowledge that entries with given IDs have been processed.
+         # Example: XACK mystream mygroup 1609459200000-0
+       ```
+     * *Get consumer group info*
+
+       ```bash
+       XINFO GROUPS {stream_key}     # List all groups for the stream
+       XINFO CONSUMERS {stream_key} {group_name}  # List consumers in a group
+       ```
+   * **Delete entries from a stream**
+
+     ```bash
+     XDEL {stream_key} {id1} [id2 ...]  # Delete specified entry IDs
+       # Example: XDEL mystream 1609459200000-0
+     ```
+   * **Stream metadata**
+
+     ```bash
+     XLEN {stream_key}                     # Get the number of entries in the stream
+       # Example: XLEN mystream
+     XINFO STREAM {stream_key}             # Get general info: length, first/last ID, etc.
+       # Example: XINFO STREAM mystream
+     XINFO STREAM {stream_key} CONSUMERS   # Alias for XINFO CONSUMERS in a consumer group context
+     XINFO STREAM {stream_key} GROUPS      # Alias for XINFO GROUPS in a consumer group context
+     ```
+
+---
+
+*End of Redis Commands section*
