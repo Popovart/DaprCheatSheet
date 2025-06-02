@@ -110,139 +110,118 @@ curl -v http://localhost:<APP_PORT>
 | `COMPlus_GCHeapHardLimit`         | Hard memory cap for a .NET process             | `512m`  |
 
 
-## Redis Commands
+## Redis Diagnostics for Dapr Pub/Sub
 
-Use these commands to connect to a Redis instance and manage keys directly from the CLI.
+When Redis is used as a Dapr pub/sub store, these commands help you inspect and troubleshoot topic data, consumer groups, and message streams.
 
-1. **Open Redis CLI inside a Docker container**
+1. **Connect to Redis CLI in Docker**
 
    ```bash
    docker exec -it dapr_redis redis-cli
    ```
 
-   * Replace `dapr_redis` with the actual container name if different.
+   * Adjust `dapr_redis` if your container name differs.
 
 2. **List keys**
 
    ```bash
-   KEYS *              # Show all keys
-   KEYS *pubsub*       # Search for keys containing "pubsub"
-   KEYS pubsub*        # Search for keys starting with "pubsub"
+   KEYS *              # Show all keys in the DB
+   KEYS *pubsub*       # Show keys containing "pubsub"
+   KEYS pubsub*        # Show keys starting with "pubsub"
    ```
 
-3. **Inspect a key’s type and value**
+   * Use `KEYS *` to confirm that your Redis instance is reachable and see every key.
+   * Use `KEYS *pubsub*` or `KEYS pubsub*` to filter for Dapr-related streams/metadata.
+
+3. **Check a key’s data type**
 
    ```bash
-   TYPE {key}          # Get the data type of the key
-   GET {key}           # Retrieve string value (for String type)
-   LRANGE {key} 0 -1   # Retrieve list elements from start to end (for List type)
-   HGETALL {key}       # Retrieve all field-value pairs (for Hash type)
-   SMEMBERS {key}      # Retrieve all members of a set (for Set type)
+   TYPE {key}
    ```
 
-   * Replace `{key}` with the actual key name you want to inspect.
+   * Identifies whether `{key}` holds a stream, list, hash, set, etc. For Dapr pub/sub, you’ll typically see `stream`.
 
-4. **Delete keys**
+4. **Inspect stream contents (topic messages)**
 
    ```bash
-   DEL {key}           # Remove a specific key
+   XRANGE {stream_key} - +            # Show every entry (ID ascending)
+   XRANGE {stream_key} {startID} {endID}  # Show entries between specific IDs
    ```
 
-5. **Flush entire database**
+   * Use `-` for the lowest ID and `+` for the highest.
+   * Example: `XRANGE pubsuborders - +`
+
+5. **Get stream length and metadata**
 
    ```bash
-   FLUSHALL            # Remove all keys in the current Redis database (use with caution)
+   XLEN {stream_key}                   # Number of entries in the stream
+   XINFO STREAM {stream_key}           # Info: length, first/last ID, etc.
+   XINFO STREAM {stream_key} GROUPS    # List all consumer groups on the stream
+   XINFO STREAM {stream_key} CONSUMERS # List consumers in each group
    ```
 
-6. **Stream Commands**
+   * Verifies that messages exist, how many there are, and which group(s) are attached.
 
-   * **Add an entry to a stream**
+6. **Inspect a consumer group’s pending entries**
 
-     ```bash
-     XADD {stream_key} * field1 value1 field2 value2
-       # Add a new entry to the stream; '*' lets Redis generate the ID
-       # Example: XADD mystream * sensor-id 1234 temperature 19.8
-     ```
-   * **Read entries from a stream**
+   ```bash
+   XINFO GROUPS {stream_key}                    # Shows each group’s pending count, last-delivered ID
+   XINFO CONSUMERS {stream_key} {group_name}    # Shows each consumer’s pending/idle counts
+   ```
 
-     ```bash
-     XRANGE {stream_key} - +            # Read all entries in ascending ID order
-     XRANGE {stream_key} {start} {end}  # Read entries between specific IDs
-       # Use '-' for minimum, '+' for maximum.
-       # Example: XRANGE mystream 1609459200000-0 1609462800000-0
-     ```
-   * **Read entries in reverse order**
+   * Confirms whether a group (e.g., `dapr-pubsub`) has unacknowledged messages.
 
-     ```bash
-     XREVRANGE {stream_key} + -         # Read all entries in descending ID order
-     XREVRANGE {stream_key} {end} {start}
-       # Swap start/end when using explicit IDs.
-       # Example: XREVRANGE mystream 1609462800000-0 1609459200000-0
-     ```
-   * **Trim a stream to a maximum length**
+7. **Read messages as a specific consumer group**
+
+   ```bash
+   XREADGROUP GROUP {group_name} {consumer_name} \
+     STREAMS {stream_key} > [COUNT {n}]
+   ```
+
+   * `{group_name}`: usually `dapr-pubsub` (default).
+   * `{consumer_name}`: any unique identifier (e.g., `consumer-1`).
+   * `>` means “only new entries not yet delivered to this group.”
+   * Example:
 
      ```bash
-     XTRIM {stream_key} MAXLEN {count}  # Keep only the most recent {count} entries
-       # Example: XTRIM mystream MAXLEN 1000
-     XTRIM {stream_key} MINID {id}      # Discard entries with IDs older than {id}
-       # Example: XTRIM mystream MINID 1609459200000-0
+     XREADGROUP GROUP dapr-pubsub consumer-1 STREAMS pubsuborders >
      ```
-   * **Read new entries (blocking or non-blocking)**
 
-     ```bash
-     XREAD STREAMS {stream_key} {last_id} [COUNT {count}] [BLOCK {milliseconds}]
-       # Read entries with ID > {last_id}; BLOCK waits up to given ms for new entries.
-       # Example (non-blocking): XREAD STREAMS mystream 0-0 COUNT 10
-       # Example (blocking):    XREAD BLOCK 5000 STREAMS mystream 0-0
-     ```
-   * **Consumer groups**
+8. **Acknowledge processed messages**
 
-     * *Create a consumer group*
+   ```bash
+   XACK {stream_key} {group_name} {id1} [id2 ...]
+   ```
 
-       ```bash
-       XGROUP CREATE {stream_key} {group_name} $ MKSTREAM
-         # Create group {group_name} starting at the latest ID ($).
-         # MKSTREAM creates {stream_key} if it does not exist.
-         # Example: XGROUP CREATE mystream mygroup $ MKSTREAM
-       ```
-     * *Read from a consumer group*
+   * Marks listed IDs as processed in `{group_name}`. If Dapr fails to acknowledge, messages remain “pending.”
 
-       ```bash
-       XREADGROUP GROUP {group_name} {consumer_name} \
-         STREAMS {stream_key} {last_id} [COUNT {count}] [BLOCK {milliseconds}]
-         # {last_id} usually '>' to fetch new entries never delivered to this group.
-         # Example: XREADGROUP GROUP mygroup consumer1 STREAMS mystream >
-       ```
-     * *Acknowledge processed entries*
+9. **Trim or delete old/pending entries**
 
-       ```bash
-       XACK {stream_key} {group_name} {id1} [id2 ...]
-         # Acknowledge that entries with given IDs have been processed.
-         # Example: XACK mystream mygroup 1609459200000-0
-       ```
-     * *Get consumer group info*
+   ```bash
+   XTRIM {stream_key} MAXLEN {count}    # Keep only the most recent {count} entries
+   XTRIM {stream_key} MINID {id}        # Drop entries with ID < {id}
+   XDEL {stream_key} {id1} [id2 ...]    # Remove specific message IDs
+   ```
 
-       ```bash
-       XINFO GROUPS {stream_key}     # List all groups for the stream
-       XINFO CONSUMERS {stream_key} {group_name}  # List consumers in a group
-       ```
-   * **Delete entries from a stream**
+   * Use carefully—trimming or deleting pending messages can clear a backlog but may also drop unprocessed events.
 
-     ```bash
-     XDEL {stream_key} {id1} [id2 ...]  # Delete specified entry IDs
-       # Example: XDEL mystream 1609459200000-0
-     ```
-   * **Stream metadata**
+10. **Remove a misbehaving consumer group**
 
-     ```bash
-     XLEN {stream_key}                     # Get the number of entries in the stream
-       # Example: XLEN mystream
-     XINFO STREAM {stream_key}             # Get general info: length, first/last ID, etc.
-       # Example: XINFO STREAM mystream
-     XINFO STREAM {stream_key} CONSUMERS   # Alias for XINFO CONSUMERS in a consumer group context
-     XINFO STREAM {stream_key} GROUPS      # Alias for XINFO GROUPS in a consumer group context
-     ```
+    ```bash
+    XGROUP DESTROY {stream_key} {group_name}
+    ```
+
+    * Deletes `{group_name}` and all pending entries. Dapr will recreate the group on next publish if configured.
+
+11. **Delete a topic stream entirely**
+
+    ```bash
+    DEL {stream_key}
+    ```
+
+    * Clears all messages and group metadata. Dapr will recreate the stream upon next publish.
 
 ---
 
-*End of Redis Commands section*
+*Use these commands to verify that messages are published correctly, consumer groups are processing and acknowledging as expected, and to clear any stuck or pending entries. Proceed with caution when trimming or deleting data in production.*
+
